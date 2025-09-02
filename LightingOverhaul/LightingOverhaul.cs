@@ -8,46 +8,12 @@ using UnityModManagerNet;
 
 namespace LightingOverhaul
 {
-    public class Settings : UnityModManager.ModSettings, IDrawable
-    {
-        // Visual tweaks
-        public bool enableDynamicShadows = true;
-        public bool enableWarmWhiteTint = true;
-
-        // Player-based selection (always enabled)
-        public float maxDistanceMeters = 150f;
-        public int   maxLightsCount    = 50;
-
-        public override void Save(UnityModManager.ModEntry modEntry) => Save(this, modEntry);
-
-        public void Draw()
-        {
-            GUILayout.Label("Lighting Overhaul Settings", UnityModManager.UI.bold);
-
-            // Visual toggles
-            enableDynamicShadows = GUILayout.Toggle(enableDynamicShadows, "Enable dynamic shadows");
-            enableWarmWhiteTint  = GUILayout.Toggle(enableWarmWhiteTint,  "Enable warm white tint");
-            GUILayout.Space(8);
-            GUILayout.Label("Selection around player");
-            GUILayout.Label($"Max distance (m): {maxDistanceMeters:0}");
-            maxDistanceMeters = Mathf.Round(GUILayout.HorizontalSlider(Mathf.Clamp(maxDistanceMeters, 10f, 500f), 10f, 500f));
-            GUILayout.Label($"Max lights (N): {maxLightsCount}");
-            maxLightsCount = Mathf.RoundToInt(GUILayout.HorizontalSlider(Mathf.Clamp(maxLightsCount, 5, 200), 5, 200));
-            GUILayout.Space(12);
-            if (GUILayout.Button("Refresh", GUILayout.Width(100f), GUILayout.Height(25f)))
-            {
-                LightingOverhaul.RequestRefresh();
-            }
-        }
-
-        public void OnChange() { }
-    }
-
     static class LightingOverhaul
     {
         public static Settings? settings;
-        private static GameObject? helperGO;
+        private static GameObject?        helperGO;
         private static SceneLightProcessor? processor;
+        private static LightingTunnel?    tunnelController;
 
         static bool Load(UnityModManager.ModEntry modEntry)
         {
@@ -59,7 +25,9 @@ namespace LightingOverhaul
 
             helperGO = new GameObject("LightingOverhaulHelper");
             Object.DontDestroyOnLoad(helperGO);
-            processor = helperGO.AddComponent<SceneLightProcessor>();
+
+            processor        = helperGO.AddComponent<SceneLightProcessor>();
+            tunnelController = helperGO.AddComponent<LightingTunnel>();
 
             SceneManager.sceneLoaded += OnSceneLoaded;
 
@@ -76,9 +44,7 @@ namespace LightingOverhaul
             try
             {
                 if (processor != null)
-                {
                     processor.StopAllCoroutines();
-                }
             }
             catch { }
             try { if (helperGO != null) Object.Destroy(helperGO); } catch { }
@@ -89,14 +55,14 @@ namespace LightingOverhaul
 
         private static void ProcessScene(Scene scene)
         {
-            if (processor == null) return;
-            processor.StartProcessing(scene);
+            if (processor != null)
+                processor.StartProcessing(scene);
         }
 
         public static void RequestRefresh()
         {
-            if (processor == null) return;
-            processor.RefreshNow();
+            if (processor != null)
+                processor.RefreshNow();
         }
     }
 
@@ -182,7 +148,7 @@ namespace LightingOverhaul
             "gadgetlight"
         };
 
-        // Warm-white targets (as in the original mod)
+        // Warm-white targets
         private static readonly Vector3[] warmTargets = new[]
         {
             new Vector3(0.910f, 0.930f, 0.880f),
