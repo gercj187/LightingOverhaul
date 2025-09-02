@@ -11,14 +11,15 @@ namespace LightingOverhaul
     static class LightingOverhaul
     {
         public static Settings? settings;
-        private static GameObject?        helperGO;
+        private static GameObject? helperGO;
         private static SceneLightProcessor? processor;
-        private static LightingTunnel?    tunnelController;
+
+        // Referenz auf den Tunnel-Controller
+        private static LightingTunnel? tunnel;
 
         static bool Load(UnityModManager.ModEntry modEntry)
         {
             Debug.Log("[LightingOverhaul] Load()");
-
             settings = Settings.Load<Settings>(modEntry);
             modEntry.OnGUI     = _ => settings?.Draw();
             modEntry.OnSaveGUI = _ => settings?.Save(modEntry);
@@ -26,11 +27,11 @@ namespace LightingOverhaul
             helperGO = new GameObject("LightingOverhaulHelper");
             Object.DontDestroyOnLoad(helperGO);
 
-            processor        = helperGO.AddComponent<SceneLightProcessor>();
-            tunnelController = helperGO.AddComponent<LightingTunnel>();
+            processor = helperGO.AddComponent<SceneLightProcessor>();
+            tunnel    = helperGO.AddComponent<LightingTunnel>();
+            Debug.Log("[LightingOverhaul] LightingTunnel component attached.");
 
             SceneManager.sceneLoaded += OnSceneLoaded;
-
             if (SceneManager.GetActiveScene().isLoaded)
                 ProcessScene(SceneManager.GetActiveScene());
 
@@ -41,13 +42,15 @@ namespace LightingOverhaul
         static bool Unload(UnityModManager.ModEntry _)
         {
             try { SceneManager.sceneLoaded -= OnSceneLoaded; } catch { }
-            try
-            {
-                if (processor != null)
-                    processor.StopAllCoroutines();
-            }
-            catch { }
+            try { if (processor != null) processor.StopAllCoroutines(); } catch { }
             try { if (helperGO != null) Object.Destroy(helperGO); } catch { }
+
+            settings  = null;
+            processor = null;
+            tunnel    = null;
+            helperGO  = null;
+
+            Debug.Log("[LightingOverhaul] Unloaded.");
             return true;
         }
 
@@ -55,31 +58,29 @@ namespace LightingOverhaul
 
         private static void ProcessScene(Scene scene)
         {
-            if (processor != null)
-                processor.StartProcessing(scene);
+            if (processor == null) return;
+            processor.StartProcessing(scene);
         }
 
         public static void RequestRefresh()
         {
-            if (processor != null)
-                processor.RefreshNow();
+            if (processor == null) return;
+            processor.RefreshNow();
         }
+
+        public static bool IsInTunnel => LightingTunnel.IsPlayerInTunnel;
     }
 
-    /// <summary>
-    /// Stores original values to allow clean revert when a light leaves the bubble.
-    /// </summary>
+    // ------- Lokale Light-Tweak-Helfer bleiben unverändert (dienen als Debug über enableDynamicShadows/enableWarmWhiteTint) -------
+
     internal sealed class LightTweakState : MonoBehaviour
     {
-        // Original values
         public bool  hadEnabled;
         public Color origColor;
         public float origBounceIntensity;
         public LightShadows origShadows;
         public float origShadowStrength;
         public float origShadowBias;
-
-        // Flags
         public bool aestheticApplied;
 
         public void CaptureFrom(Light l)
@@ -107,29 +108,23 @@ namespace LightingOverhaul
     {
         public static bool TryGetPlayerPosition(out Vector3 pos)
         {
-            // 1) Main camera
             if (Camera.main != null)
             {
                 pos = Camera.main.transform.position;
                 return true;
             }
-
-            // 2) GameObject tagged "Player"
             var go = GameObject.FindWithTag("Player");
             if (go != null)
             {
                 pos = go.transform.position;
                 return true;
             }
-
-            // 3) Any active camera
             var any = Object.FindObjectsOfType<Camera>().FirstOrDefault(c => c.isActiveAndEnabled);
             if (any != null)
             {
                 pos = any.transform.position;
                 return true;
             }
-
             pos = Vector3.zero;
             return false;
         }
@@ -137,18 +132,14 @@ namespace LightingOverhaul
 
     internal static class LightTweakHelper
     {
-        // Known gadget/portable light prefixes to skip
         private static readonly HashSet<string> knownGadgetLights = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase)
         {
-            "lighter", "lantern", "beaconred", "swivellight", "flashlight",
-            "eotlantern", "beaconamber", "lightbarcyan", "beaconblue",
-            "lightbarorange", "modernheadlightr", "modernheadlightl",
-            "lightbaryellow", "lightbarpurple", "lightbargreen",
-            "lightbarred", "lightbarwhite", "headlight", "lightbarblue",
-            "gadgetlight"
+            "lighter","lantern","beaconred","swivellight","flashlight","eotlantern",
+            "beaconamber","lightbarcyan","beaconblue","lightbarorange","modernheadlightr",
+            "modernheadlightl","lightbaryellow","lightbarpurple","lightbargreen",
+            "lightbarred","lightbarwhite","headlight","lightbarblue","gadgetlight"
         };
 
-        // Warm-white targets
         private static readonly Vector3[] warmTargets = new[]
         {
             new Vector3(0.910f, 0.930f, 0.880f),
@@ -165,14 +156,11 @@ namespace LightingOverhaul
         public static bool IsGadgetLight(Transform t)
         {
             if (t == null) return false;
-
-            // Check root name (strip Clone suffix)
             string rootName = t.root?.name?.Replace("(Clone)", "").Trim() ?? string.Empty;
             foreach (string prefix in knownGadgetLights)
                 if (rootName.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase))
                     return true;
 
-            // Check component type names along the hierarchy path
             Transform current = t;
             while (current != null)
             {
@@ -191,7 +179,6 @@ namespace LightingOverhaul
 
         public static bool ApplyAesthetic(Light l, Settings s)
         {
-            // Only act on lights that match warm-white baseline
             bool colorMatch = MatchesWarmColor(l.color);
             if (!colorMatch) return false;
 
@@ -236,7 +223,6 @@ namespace LightingOverhaul
 
     internal sealed class SceneLightProcessor : MonoBehaviour
     {
-        // Fixed runtime behavior (no UI toggles)
         private const float UpdateIntervalSeconds = 0.75f;
         private const float MinMoveMetersForRefresh = 8f;
         private const bool  RevertOutsideBubble = true;
@@ -244,8 +230,6 @@ namespace LightingOverhaul
         private Coroutine? loopRoutine;
         private readonly HashSet<Light> activeTweaked = new();
         private Vector3 lastPlayerPos = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-
-        // Logging throttling
         private int lastActiveCount = -1;
 
         public void StartProcessing(Scene scene)
@@ -254,17 +238,12 @@ namespace LightingOverhaul
             activeTweaked.Clear();
             lastActiveCount = -1;
             lastPlayerPos = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-
-            // Small initial burst (3 frames) to catch late spawns after scene load
             StartCoroutine(InitialBurst());
-
-            // Start proximity loop
             loopRoutine = StartCoroutine(ProximityLoop());
         }
 
         public void RefreshNow()
         {
-            // Fully revert current bubble, then restart processing with current settings
             try
             {
                 foreach (var l in activeTweaked.ToList())
@@ -273,15 +252,11 @@ namespace LightingOverhaul
                     LightTweakHelper.RevertAesthetic(l);
                 }
             }
-            catch { /* ignore */ }
-
+            catch { }
             activeTweaked.Clear();
             lastActiveCount = -1;
             lastPlayerPos = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-
             StopRunning();
-
-            // Immediate re-apply for current scene
             StartCoroutine(InitialBurst());
             loopRoutine = StartCoroutine(ProximityLoop());
             Debug.Log("[LightingOverhaul] Refresh applied.");
@@ -297,7 +272,7 @@ namespace LightingOverhaul
             StopAllCoroutines();
         }
 
-        private IEnumerator InitialBurst()
+        private System.Collections.IEnumerator InitialBurst()
         {
             for (int i = 0; i < 3; i++)
             {
@@ -306,15 +281,13 @@ namespace LightingOverhaul
             }
         }
 
-        private IEnumerator ProximityLoop()
+        private System.Collections.IEnumerator ProximityLoop()
         {
             while (true)
             {
                 yield return new WaitForSeconds(UpdateIntervalSeconds);
-
                 if (!HasPlayerMovedEnough(MinMoveMetersForRefresh))
                     continue;
-
                 ProximityRefresh(force: false);
             }
         }
@@ -323,13 +296,11 @@ namespace LightingOverhaul
         {
             if (!PlayerRef.TryGetPlayerPosition(out var pos))
                 return false;
-
             if (lastPlayerPos.x == float.MinValue)
             {
                 lastPlayerPos = pos;
-                return true; // first run
+                return true;
             }
-
             float dist2 = (pos - lastPlayerPos).sqrMagnitude;
             if (dist2 >= minMoveMeters * minMoveMeters)
             {
@@ -364,13 +335,11 @@ namespace LightingOverhaul
             }
             else
             {
-                // Fallback if player position is unknown
                 seq = seq.Take(Mathf.Max(1, s.maxLightsCount));
             }
 
             var targetSet = new HashSet<Light>(seq.Select(t => t.l));
 
-            // Revert everything that left the bubble
             if (RevertOutsideBubble && activeTweaked.Count > 0)
             {
                 activeTweaked.RemoveWhere(x => x == null);
@@ -381,19 +350,17 @@ namespace LightingOverhaul
                 }
             }
 
-            // Apply to new lights within the bubble
             foreach (var l in targetSet)
             {
                 if (l == null) continue;
                 if (activeTweaked.Contains(l)) continue;
-
                 if (LightTweakHelper.ApplyAesthetic(l, s))
                     activeTweaked.Add(l);
             }
 
             if (activeTweaked.Count != lastActiveCount)
             {
-                Debug.Log($"[LightingOverhaul] Active tweaked: {activeTweaked.Count}");
+                //Debug.Log($"[LightingOverhaul] Active tweaked: {activeTweaked.Count}");
                 lastActiveCount = activeTweaked.Count;
             }
         }
