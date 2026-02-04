@@ -1,8 +1,8 @@
-{
-	"Releases": [
-		{
-			"Id": "LightingOverhaul",
-			"Version": "1.0.0",
-		}
-	]
-}
+[
+	{
+		"Id": "LightingOverhaul",
+		"Version": "1.05.0",
+		"DownloadUrl": "https://github.com/gercj187/LightingOverhaul/releases/download/LightingOverhaul/LightingOverhaul_v1.05.0.zip"
+	}
+]
+
