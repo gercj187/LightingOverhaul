@@ -14,7 +14,6 @@ namespace LightingOverhaul
         private static GameObject? helperGO;
         private static SceneLightProcessor? processor;
 
-        // Referenz auf den Tunnel-Controller
         private static LightingTunnel? tunnel;
 
         static bool Load(UnityModManager.ModEntry modEntry)
@@ -67,11 +66,7 @@ namespace LightingOverhaul
             if (processor == null) return;
             processor.RefreshNow();
         }
-
-        public static bool IsInTunnel => LightingTunnel.IsPlayerInTunnel;
     }
-
-    // ------- Lokale Light-Tweak-Helfer bleiben unverändert (dienen als Debug über enableDynamicShadows/enableWarmWhiteTint) -------
 
     internal sealed class LightTweakState : MonoBehaviour
     {
@@ -176,12 +171,28 @@ namespace LightingOverhaul
             }
             return false;
         }
+		
+		private static Color ApplyColorPreset(Color original, Settings s)
+		{
+			switch (s.lightColorPreset)
+			{
+				case LightColorPreset.WarmWhite:
+					return new Color(1.0f, 0.85f, 0.65f, original.a);
+
+				case LightColorPreset.Yellow:
+					return new Color(1.0f, 0.85f, 0.25f, original.a);
+
+				case LightColorPreset.ColdWhite:
+				default:
+					return original;
+			}
+		}
 
         public static bool ApplyAesthetic(Light l, Settings s)
         {
             bool colorMatch = MatchesWarmColor(l.color);
             if (!colorMatch) return false;
-
+			
             var state = l.GetComponent<LightTweakState>();
             if (state == null)
             {
@@ -198,13 +209,13 @@ namespace LightingOverhaul
                 l.shadowBias = 0.001f;
                 changed = true;
             }
-
-            if (s.enableWarmWhiteTint)
-            {
-                l.color = new Color(1.0f, 0.85f, 0.65f, 1.0f);
-                l.bounceIntensity = 1.0f;
-                changed = true;
-            }
+			
+			if (s.lightColorPreset != LightColorPreset.ColdWhite)
+			{
+				l.color = ApplyColorPreset(l.color, s);
+				l.bounceIntensity = 1.0f;
+				changed = true;
+			}
 
             state.aestheticApplied = state.aestheticApplied || changed;
             return changed;
@@ -360,7 +371,6 @@ namespace LightingOverhaul
 
             if (activeTweaked.Count != lastActiveCount)
             {
-                //Debug.Log($"[LightingOverhaul] Active tweaked: {activeTweaked.Count}");
                 lastActiveCount = activeTweaked.Count;
             }
         }
