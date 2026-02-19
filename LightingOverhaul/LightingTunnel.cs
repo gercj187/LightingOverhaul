@@ -12,7 +12,7 @@ namespace LightingOverhaul
 
         private const string TunnelNameSuffix = "tunnel";
         private const float SamplerOffsetY = 0.4f;
-        private const float PresenceSmoothTime = 0.45f;
+        private const float PresenceSmoothTime = 0.15f;
         
         private ConeSampler? sampler;
 
@@ -123,7 +123,7 @@ namespace LightingOverhaul
                 blendStartT = Time.unscaledTime;
                 
                 float baseTime = Mathf.Max(0.01f, s.tunnelBlendTime);
-                blendDuration = inTunnel ? baseTime : baseTime * 0.6f; 
+                blendDuration = inTunnel ? baseTime : baseTime * 0.2f; 
                 
                 blendStartValue = darkCurrent;
                 blendTargetValue = inTunnel ? 1.0f : 0.0f;
